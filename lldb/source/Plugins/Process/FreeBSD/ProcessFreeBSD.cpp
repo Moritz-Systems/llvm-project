@@ -255,6 +255,7 @@ ProcessFreeBSD::ProcessFreeBSD(lldb::TargetSP target_sp,
       m_byte_order(endian::InlHostByteOrder()), m_monitor(NULL), m_module(NULL),
       m_message_mutex(), m_exit_now(false), m_seen_initial_stop(),
       m_resume_signo(0) {
+  printf("OLD PLUGIN USED\n");
   // FIXME: Putting this code in the ctor and saving the byte order in a
   // member variable is a hack to avoid const qual issues in GetByteOrder.
   lldb::ModuleSP module = GetTarget().GetExecutableModule();
