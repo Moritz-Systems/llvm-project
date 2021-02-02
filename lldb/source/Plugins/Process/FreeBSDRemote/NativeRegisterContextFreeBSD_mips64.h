@@ -54,7 +54,6 @@ public:
 private:
   enum RegSetKind {
     GPRegSet,
-    FPRegSet,
   };
   std::array<uint8_t, sizeof(reg)> m_reg_data;
 

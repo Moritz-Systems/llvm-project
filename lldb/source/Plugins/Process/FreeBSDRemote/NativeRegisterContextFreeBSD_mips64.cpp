@@ -64,10 +64,6 @@ Status NativeRegisterContextFreeBSD_mips64::ReadRegisterSet(RegSetKind set) {
   case GPRegSet:
     return NativeProcessFreeBSD::PtraceWrapper(PT_GETREGS, m_thread.GetID(),
                                                m_reg_data.data());
-  case FPRegSet:
-    return NativeProcessFreeBSD::PtraceWrapper(
-        PT_GETVFPREGS, m_thread.GetID(),
-        m_reg_data.data() + sizeof(RegisterContextFreeBSD_mips64::GPR));
   }
   llvm_unreachable("NativeRegisterContextFreeBSD_mips64::ReadRegisterSet");
 }
@@ -77,10 +73,6 @@ Status NativeRegisterContextFreeBSD_mips64::WriteRegisterSet(RegSetKind set) {
   case GPRegSet:
     return NativeProcessFreeBSD::PtraceWrapper(PT_SETREGS, m_thread.GetID(),
                                                m_reg_data.data());
-  case FPRegSet:
-    return NativeProcessFreeBSD::PtraceWrapper(
-        PT_SETVFPREGS, m_thread.GetID(),
-        m_reg_data.data() + sizeof(RegisterContextFreeBSD_mips64::GPR));
   }
   llvm_unreachable("NativeRegisterContextFreeBSD_mips64::WriteRegisterSet");
 }
@@ -102,11 +94,7 @@ NativeRegisterContextFreeBSD_mips64::ReadRegister(const RegisterInfo *reg_info,
                                                ? reg_info->name
                                                : "<unknown register>");
 
-#if 0
-  RegSetKind set = GetRegisterInfo().GetRegisterSetFromRegisterIndex(reg);
-#else
   RegSetKind set = GPRegSet;
-#endif
   error = ReadRegisterSet(set);
   if (error.Fail())
     return error;
@@ -131,11 +119,7 @@ Status NativeRegisterContextFreeBSD_mips64::WriteRegister(
                                                ? reg_info->name
                                                : "<unknown register>");
 
-#if 0
-  RegSetKind set = GetRegisterInfo().GetRegisterSetFromRegisterIndex(reg);
-#else
   RegSetKind set = GPRegSet;
-#endif
   error = ReadRegisterSet(set);
   if (error.Fail())
     return error;
@@ -154,12 +138,6 @@ Status NativeRegisterContextFreeBSD_mips64::ReadAllRegisterValues(
   error = ReadRegisterSet(GPRegSet);
   if (error.Fail())
     return error;
-
-#if 0
-  error = ReadRegisterSet(FPRegSet);
-  if (error.Fail())
-    return error;
-#endif
 
   data_sp.reset(new DataBufferHeap(m_reg_data.size(), 0));
   uint8_t *dst = data_sp->GetBytes();
@@ -197,15 +175,7 @@ Status NativeRegisterContextFreeBSD_mips64::WriteAllRegisterValues(
   }
   ::memcpy(m_reg_data.data(), src, m_reg_data.size());
 
-#if 1
   return WriteRegisterSet(GPRegSet);
-#else
-  error = WriteRegisterSet(GPRegSet);
-  if (error.Fail())
-    return error;
-
-  return WriteRegisterSet(FPRegSet);
-#endif
 }
 
 llvm::Error NativeRegisterContextFreeBSD_mips64::CopyHardwareWatchpointsFrom(
