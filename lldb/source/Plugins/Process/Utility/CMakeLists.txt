@@ -10,6 +10,7 @@ add_lldb_library(lldbPluginProcessUtility
   LinuxSignals.cpp
   MipsLinuxSignals.cpp
   NativeProcessSoftwareSingleStep.cpp
+  NativeRegisterContextBreakWatchpoint_arm64.cpp
   NativeRegisterContextRegisterInfo.cpp
   NativeRegisterContextWatchpoint_x86.cpp
   NetBSDSignals.cpp

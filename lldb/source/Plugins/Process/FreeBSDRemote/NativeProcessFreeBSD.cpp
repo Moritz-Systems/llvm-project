@@ -281,12 +281,15 @@ void NativeProcessFreeBSD::MonitorSIGTRAP(lldb::pid_t pid) {
       SetState(StateType::eStateStopped, true);
       return;
     case TRAP_TRACE:
+      LLDB_LOG(log, "SIGTRAP/TRAP_TRACE: si_addr: {0}",
+               info.pl_siginfo.si_addr);
+
       if (thread) {
         auto &regctx = static_cast<NativeRegisterContextFreeBSD &>(
             thread->GetRegisterContext());
         uint32_t wp_index = LLDB_INVALID_INDEX32;
-        Status error =
-            regctx.GetWatchpointHitIndex(wp_index, LLDB_INVALID_ADDRESS);
+        Status error = regctx.GetWatchpointHitIndex(
+            wp_index, reinterpret_cast<uintptr_t>(info.pl_siginfo.si_addr));
         if (error.Fail())
           LLDB_LOG(log,
                    "received error while checking for watchpoint hits, pid = "

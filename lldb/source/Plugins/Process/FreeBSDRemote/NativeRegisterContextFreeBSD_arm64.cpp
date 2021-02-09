@@ -15,6 +15,7 @@
 #include "lldb/Utility/Status.h"
 
 #include "Plugins/Process/FreeBSDRemote/NativeProcessFreeBSD.h"
+#include "Plugins/Process/POSIX/ProcessPOSIXLog.h"
 #include "Plugins/Process/Utility/RegisterInfoPOSIX_arm64.h"
 
 // clang-format off
@@ -36,7 +37,8 @@ NativeRegisterContextFreeBSD::CreateHostNativeRegisterContextFreeBSD(
 NativeRegisterContextFreeBSD_arm64::NativeRegisterContextFreeBSD_arm64(
     const ArchSpec &target_arch, NativeThreadProtocol &native_thread)
     : NativeRegisterContextRegisterInfo(
-          native_thread, new RegisterInfoPOSIX_arm64(target_arch)) {
+          native_thread, new RegisterInfoPOSIX_arm64(target_arch)),
+      m_read_dbreg(false) {
   GetRegisterInfo().ConfigureVectorRegisterInfos(
       RegisterInfoPOSIX_arm64::eVectorQuadwordAArch64);
 }
@@ -204,6 +206,48 @@ Status NativeRegisterContextFreeBSD_arm64::WriteAllRegisterValues(
 llvm::Error NativeRegisterContextFreeBSD_arm64::CopyHardwareWatchpointsFrom(
     NativeRegisterContextFreeBSD &source) {
   return llvm::Error::success();
+}
+
+llvm::Error NativeRegisterContextFreeBSD_arm64::ReadHardwareDebugInfo() {
+  Log *log(ProcessPOSIXLog::GetLogIfAllCategoriesSet(POSIX_LOG_REGISTERS));
+
+  // we're fully stateful, so no need to reread control registers ever
+  if (m_read_dbreg)
+    return llvm::Error::success();
+
+  Status res = NativeProcessFreeBSD::PtraceWrapper(PT_GETDBREGS,
+                                                   m_thread.GetID(), &m_dbreg);
+  if (res.Fail())
+    return res.ToError();
+
+  LLDB_LOG(log, "m_dbreg read: debug_ver={0}, nbkpts={1}, nwtpts={2}",
+           m_dbreg.db_debug_ver, m_dbreg.db_nbkpts, m_dbreg.db_nwtpts);
+  m_max_hbp_supported = m_dbreg.db_nbkpts;
+  m_max_hwp_supported = m_dbreg.db_nwtpts;
+  assert(m_max_hbp_supported <= m_hbr_regs.size());
+  assert(m_max_hwp_supported <= m_hwp_regs.size());
+
+  m_read_dbreg = true;
+  return llvm::Error::success();
+}
+
+llvm::Error
+NativeRegisterContextFreeBSD_arm64::WriteHardwareDebugRegs(DREGType hwbType) {
+  assert(m_read_dbreg && "dbregs must be read before writing them back");
+
+  // copy data from m_*_regs to m_dbreg before writing it back
+  for (uint32_t i = 0; i < m_max_hbp_supported; i++) {
+    m_dbreg.db_breakregs[i].dbr_addr = m_hbr_regs[i].address;
+    m_dbreg.db_breakregs[i].dbr_ctrl = m_hbr_regs[i].control;
+  }
+  for (uint32_t i = 0; i < m_max_hwp_supported; i++) {
+    m_dbreg.db_watchregs[i].dbw_addr = m_hwp_regs[i].address;
+    m_dbreg.db_watchregs[i].dbw_ctrl = m_hwp_regs[i].control;
+  }
+
+  return NativeProcessFreeBSD::PtraceWrapper(PT_SETDBREGS, m_thread.GetID(),
+                                             &m_dbreg)
+      .ToError();
 }
 
 #endif // defined (__aarch64__)

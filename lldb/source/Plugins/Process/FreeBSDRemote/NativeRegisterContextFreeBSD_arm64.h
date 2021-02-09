@@ -17,6 +17,7 @@
 // clang-format on
 
 #include "Plugins/Process/FreeBSDRemote/NativeRegisterContextFreeBSD.h"
+#include "Plugins/Process/Utility/NativeRegisterContextBreakWatchpoint_arm64.h"
 #include "Plugins/Process/Utility/RegisterInfoPOSIX_arm64.h"
 
 #include <array>
@@ -26,7 +27,9 @@ namespace process_freebsd {
 
 class NativeProcessFreeBSD;
 
-class NativeRegisterContextFreeBSD_arm64 : public NativeRegisterContextFreeBSD {
+class NativeRegisterContextFreeBSD_arm64
+    : public NativeRegisterContextFreeBSD,
+      public NativeRegisterContextBreakWatchpoint_arm64 {
 public:
   NativeRegisterContextFreeBSD_arm64(const ArchSpec &target_arch,
                                      NativeThreadProtocol &native_thread);
@@ -56,9 +59,14 @@ private:
   // and sizes, so we do not have to worry about these (and we have
   // a unittest to assert that).
   std::array<uint8_t, sizeof(reg) + sizeof(fpreg)> m_reg_data;
+  dbreg m_dbreg;
+  bool m_read_dbreg;
 
   Status ReadRegisterSet(uint32_t set);
   Status WriteRegisterSet(uint32_t set);
+
+  llvm::Error ReadHardwareDebugInfo() override;
+  llvm::Error WriteHardwareDebugRegs(DREGType hwbType) override;
 
   RegisterInfoPOSIX_arm64 &GetRegisterInfo() const;
 };
