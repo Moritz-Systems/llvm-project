@@ -16,7 +16,7 @@
 #include <machine/reg.h>
 // clang-format on
 
-#include "Plugins/Process/FreeBSDRemote/NativeRegisterContextFreeBSD.h"
+#include "Plugins/Process/FreeBSD/NativeRegisterContextFreeBSD.h"
 #include "Plugins/Process/Utility/NativeRegisterContextBreakWatchpoint_arm64.h"
 #include "Plugins/Process/Utility/RegisterInfoPOSIX_arm64.h"
 
