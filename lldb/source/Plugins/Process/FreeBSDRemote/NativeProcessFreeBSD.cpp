@@ -213,8 +213,9 @@ void NativeProcessFreeBSD::MonitorSIGTRAP(lldb::pid_t pid) {
       llvm::Error error = t.CopyWatchpointsFrom(
           static_cast<NativeThreadFreeBSD &>(*GetCurrentThread()));
       if (error) {
+        auto error_msg = llvm::toString(std::move(error));
         LLDB_LOG(log, "failed to copy watchpoints to new thread {0}: {1}",
-                 info.pl_lwpid, llvm::toString(std::move(error)));
+                 info.pl_lwpid, error_msg);
         SetState(StateType::eStateInvalid);
         return;
       }
