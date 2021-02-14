@@ -658,7 +658,7 @@ size_t NativeProcessFreeBSD::UpdateThreads() { return m_threads.size(); }
 Status NativeProcessFreeBSD::SetBreakpoint(lldb::addr_t addr, uint32_t size,
                                            bool hardware) {
   if (hardware)
-    return Status("NativeProcessFreeBSD does not support hardware breakpoints");
+    return SetHardwareBreakpoint(addr, size);
   else
     return SetSoftwareBreakpoint(addr, size);
 }
