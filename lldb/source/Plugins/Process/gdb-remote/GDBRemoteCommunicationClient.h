@@ -521,6 +521,8 @@ public:
   llvm::Expected<std::vector<uint8_t>>
   SendTraceGetBinaryData(const TraceGetBinaryDataRequest &request);
 
+  bool GetSaveCoreSupported() const;
+
 protected:
   LazyBool m_supports_not_sending_acks;
   LazyBool m_supports_thread_suffix;
@@ -558,6 +560,7 @@ protected:
   LazyBool m_supports_QPassSignals;
   LazyBool m_supports_error_string_reply;
   LazyBool m_supports_multiprocess;
+  LazyBool m_supports_qSaveCore;
 
   bool m_supports_qProcessInfoPID : 1, m_supports_qfProcessInfo : 1,
       m_supports_qUserName : 1, m_supports_qGroupName : 1,
