@@ -217,6 +217,10 @@ void GDBRemoteCommunicationServerLLGS::RegisterPacketHandlers() {
                           quit = true;
                           return this->Handle_k(packet);
                         });
+
+  RegisterMemberFunctionHandler(
+      StringExtractorGDBRemote::eServerPacketType_qLLDBSaveCore,
+      &GDBRemoteCommunicationServerLLGS::Handle_qSaveCore);
 }
 
 void GDBRemoteCommunicationServerLLGS::SetLaunchInfo(const ProcessLaunchInfo &info) {
@@ -3414,6 +3418,41 @@ GDBRemoteCommunicationServerLLGS::Handle_QPassSignals(
   return SendOKResponse();
 }
 
+GDBRemoteCommunication::PacketResult
+GDBRemoteCommunicationServerLLGS::Handle_qSaveCore(
+    StringExtractorGDBRemote &packet) {
+  // Fail if we don't have a current process.
+  if (!m_current_process ||
+      (m_current_process->GetID() == LLDB_INVALID_PROCESS_ID))
+    return SendErrorResponse(Status("Process not running."));
+
+  std::string path_hint;
+
+  StringRef packet_str{packet.GetStringRef()};
+  bool cf = packet_str.consume_front("qSaveCore");
+  assert(cf);
+  if (packet_str.consume_front(";")) {
+    llvm::SmallVector<llvm::StringRef, 2> fields;
+    packet_str.split(fields, ';');
+
+    for (auto x : fields) {
+      if (x.consume_front("path-hint:"))
+        StringExtractor(x).GetHexByteString(path_hint);
+      else
+        return SendErrorResponse(Status("Unsupported qSaveCore option"));
+    }
+  }
+
+  llvm::Expected<std::string> ret = m_current_process->SaveCore(path_hint);
+  if (!ret)
+    return SendErrorResponse(std::move(ret.takeError()));
+
+  StreamString response;
+  response.PutCString("core-path:");
+  response.PutStringAsRawHex8(ret.get());
+  return SendPacketNoLock(response.GetString());
+}
+
 void GDBRemoteCommunicationServerLLGS::MaybeCloseInferiorTerminalConnection() {
   Log *log(GetLogIfAnyCategoriesSet(LIBLLDB_LOG_PROCESS));
 
@@ -3608,6 +3647,8 @@ std::vector<std::string> GDBRemoteCommunicationServerLLGS::HandleFeatures(
     ret.push_back("qXfer:auxv:read+");
   if (bool(plugin_features & Extension::libraries_svr4))
     ret.push_back("qXfer:libraries-svr4:read+");
+  if (bool(plugin_features & Extension::savecore))
+    ret.push_back("qSaveCore+");
 
   // check for client features
   m_extensions_supported = {};
