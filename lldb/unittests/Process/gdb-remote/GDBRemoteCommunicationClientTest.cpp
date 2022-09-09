@@ -29,7 +29,9 @@ namespace {
 typedef GDBRemoteCommunication::PacketResult PacketResult;
 
 struct TestClient : public GDBRemoteCommunicationClient {
-  TestClient() { m_send_acks = false; }
+  TestClient() {
+    GetCommunication().DisableSendingAcks();
+  }
 };
 
 void Handle_QThreadSuffixSupported(MockServer &server, bool supported) {
@@ -62,7 +64,8 @@ std::string one_register_hex = "41424344";
 class GDBRemoteCommunicationClientTest : public GDBRemoteTest {
 public:
   void SetUp() override {
-    ASSERT_THAT_ERROR(GDBRemoteCommunication::ConnectLocally(client, server),
+    ASSERT_THAT_ERROR(GDBRemoteCommunication::ConnectLocally(
+                          client.GetCommunication(), server),
                       llvm::Succeeded());
   }
 

@@ -196,20 +196,20 @@ uint64_t GDBRemoteCommunicationClient::GetRemoteMaxPacketSize() {
 
 bool GDBRemoteCommunicationClient::QueryNoAckModeSupported() {
   if (m_supports_not_sending_acks == eLazyBoolCalculate) {
-    m_send_acks = true;
     m_supports_not_sending_acks = eLazyBoolNo;
 
     // This is the first real packet that we'll send in a debug session and it
     // may take a little longer than normal to receive a reply.  Wait at least
     // 6 seconds for a reply to this packet.
 
-    ScopedTimeout timeout(*this, std::max(GetPacketTimeout(), seconds(6)));
+    GDBRemoteCommunication::ScopedTimeout timeout(
+        m_comm, std::max(m_comm.GetPacketTimeout(), seconds(6)));
 
     StringExtractorGDBRemote response;
     if (SendPacketAndWaitForResponse("QStartNoAckMode", response) ==
         PacketResult::Success) {
       if (response.IsOKResponse()) {
-        m_send_acks = false;
+        m_comm.DisableSendingAcks();
         m_supports_not_sending_acks = eLazyBoolYes;
       }
       return true;
@@ -380,9 +380,10 @@ void GDBRemoteCommunicationClient::GetRemoteQSupported() {
         m_supports_qXfer_memory_map_read = eLazyBoolYes;
       else if (x == "qXfer:siginfo:read+")
         m_supports_qXfer_siginfo_read = eLazyBoolYes;
-      else if (x == "qEcho")
+      else if (x == "qEcho") {
         m_supports_qEcho = eLazyBoolYes;
-      else if (x == "QPassSignals+")
+        m_comm.EnableqEcho();
+      } else if (x == "QPassSignals+")
         m_supports_QPassSignals = eLazyBoolYes;
       else if (x == "multiprocess+")
         m_supports_multiprocess = eLazyBoolYes;
@@ -1109,9 +1110,8 @@ void GDBRemoteCommunicationClient::MaybeEnableCompression(
     if (SendPacketAndWaitForResponse(packet, response) != PacketResult::Success)
       return;
 
-    if (response.IsOKResponse()) {
-      m_compression_type = avail_type;
-    }
+    if (response.IsOKResponse())
+      m_comm.EnableCompression(avail_type);
   }
 }
 
@@ -1178,7 +1178,7 @@ bool GDBRemoteCommunicationClient::GetHostInfo(bool force) {
   if (force || m_qHostInfo_is_valid == eLazyBoolCalculate) {
     // host info computation can require DNS traffic and shelling out to external processes.
     // Increase the timeout to account for that.
-    ScopedTimeout timeout(*this, seconds(10));
+    GDBRemoteCommunication::ScopedTimeout timeout(m_comm, seconds(10));
     m_qHostInfo_is_valid = eLazyBoolNo;
     StringExtractorGDBRemote response;
     if (SendPacketAndWaitForResponse("qHostInfo", response) ==
@@ -1271,7 +1271,7 @@ bool GDBRemoteCommunicationClient::GetHostInfo(bool force) {
             uint32_t timeout_seconds;
             if (!value.getAsInteger(0, timeout_seconds)) {
               m_default_packet_timeout = seconds(timeout_seconds);
-              SetPacketTimeout(m_default_packet_timeout);
+              m_comm.SetPacketTimeout(m_default_packet_timeout);
               ++num_keys_decoded;
             }
           } else if (name.equals("vm-page-size")) {
@@ -2317,7 +2317,7 @@ uint32_t GDBRemoteCommunicationClient::FindProcesses(
     StringExtractorGDBRemote response;
     // Increase timeout as the first qfProcessInfo packet takes a long time on
     // Android. The value of 1min was arrived at empirically.
-    ScopedTimeout timeout(*this, minutes(1));
+    GDBRemoteCommunication::ScopedTimeout timeout(m_comm, minutes(1));
     if (SendPacketAndWaitForResponse(packet.GetString(), response) ==
         PacketResult::Success) {
       do {
@@ -2595,7 +2595,7 @@ bool GDBRemoteCommunicationClient::LaunchGDBServer(
     }
   }
   // give the process a few seconds to startup
-  ScopedTimeout timeout(*this, seconds(10));
+  GDBRemoteCommunication::ScopedTimeout timeout(m_comm, seconds(10));
 
   if (SendPacketAndWaitForResponse(stream.GetString(), response) ==
       PacketResult::Success) {
@@ -3862,7 +3862,8 @@ GDBRemoteCommunicationClient::GetModulesInfo(
                           unescaped_payload.GetSize());
 
   // Increase the timeout for jModulesInfo since this packet can take longer.
-  ScopedTimeout timeout(*this, std::chrono::seconds(10));
+  GDBRemoteCommunication::ScopedTimeout timeout(m_comm,
+                                                std::chrono::seconds(10));
 
   StringExtractorGDBRemote response;
   if (SendPacketAndWaitForResponse(payload.GetString(), response) !=
@@ -4256,9 +4257,9 @@ bool GDBRemoteCommunicationClient::UsesNativeSignals() {
 
 llvm::Expected<int> GDBRemoteCommunicationClient::KillProcess(lldb::pid_t pid) {
   StringExtractorGDBRemote response;
-  GDBRemoteCommunication::ScopedTimeout(*this, seconds(3));
+  GDBRemoteCommunication::ScopedTimeout(m_comm, seconds(3));
 
-  if (SendPacketAndWaitForResponse("k", response, GetPacketTimeout()) !=
+  if (SendPacketAndWaitForResponse("k", response, m_comm.GetPacketTimeout()) !=
       PacketResult::Success)
     return llvm::createStringError(llvm::inconvertibleErrorCode(),
                                    "failed to send k packet");

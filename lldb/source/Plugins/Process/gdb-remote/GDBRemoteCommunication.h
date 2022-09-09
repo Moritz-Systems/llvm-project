@@ -166,10 +166,26 @@ public:
   /// Expand GDB run-length encoding.
   static std::string ExpandRLE(std::string);
 
+  void EnableqEcho() { m_supports_qEcho = true; }
+
+  void DisableSendingAcks() { m_send_acks = false; }
+
+  void EnableCompression(CompressionType type) { m_compression_type = type; }
+
+  PacketResult ReadPacket(StringExtractorGDBRemote &response,
+                          Timeout<std::micro> timeout, bool sync_on_timeout);
+
+  PacketResult ReadPacketWithOutputSupport(
+      StringExtractorGDBRemote &response, Timeout<std::micro> timeout,
+      bool sync_on_timeout,
+      llvm::function_ref<void(llvm::StringRef)> output_callback);
+
+  PacketResult SendPacketNoLock(llvm::StringRef payload);
+
 protected:
   std::chrono::seconds m_packet_timeout;
   uint32_t m_echo_number;
-  LazyBool m_supports_qEcho;
+  bool m_supports_qEcho;
   GDBRemoteCommunicationHistory m_history;
   bool m_send_acks;
   bool m_is_platform; // Set to true if this class represents a platform,
@@ -180,15 +196,11 @@ protected:
   std::recursive_mutex m_bytes_mutex;
   CompressionType m_compression_type;
 
-  PacketResult SendPacketNoLock(llvm::StringRef payload);
   PacketResult SendNotificationPacketNoLock(llvm::StringRef notify_type,
                                             std::deque<std::string>& queue,
                                             llvm::StringRef payload);
   PacketResult SendRawPacketNoLock(llvm::StringRef payload,
                                    bool skip_ack = false);
-
-  PacketResult ReadPacket(StringExtractorGDBRemote &response,
-                          Timeout<std::micro> timeout, bool sync_on_timeout);
 
   PacketResult WaitForPacketNoLock(StringExtractorGDBRemote &response,
                                    Timeout<std::micro> timeout,

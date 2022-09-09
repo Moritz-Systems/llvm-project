@@ -16,8 +16,10 @@
 namespace lldb_private {
 namespace process_gdb_remote {
 
-class GDBRemoteClientBase : public GDBRemoteCommunication, public Broadcaster {
+class GDBRemoteClientBase : public Broadcaster {
 public:
+  typedef GDBRemoteCommunication::PacketResult PacketResult;
+
   enum {
     eBroadcastBitRunPacketSent = (1u << 0),
   };
@@ -96,7 +98,28 @@ public:
     void SyncWithContinueThread();
   };
 
+  // Wrappers for GDBRemoteCommunication API.
+  PacketResult ReadPacket(StringExtractorGDBRemote &response,
+                          Timeout<std::micro> timeout, bool sync_on_timeout);
+
+  PacketResult SendPacketNoLock(llvm::StringRef payload);
+
+  size_t SendAck();
+
+  size_t Write(const void *src, size_t src_len, lldb::ConnectionStatus &status,
+               Status *error_ptr);
+
+  bool IsConnected() const;
+
+  lldb::ConnectionStatus Disconnect(Status *error_ptr = nullptr);
+
+  GDBRemoteCommunication &GetCommunication() {
+    return m_comm;
+  }
+
 protected:
+  GDBRemoteCommunication m_comm;
+
   PacketResult
   SendPacketAndWaitForResponseNoLock(llvm::StringRef payload,
                                      StringExtractorGDBRemote &response);

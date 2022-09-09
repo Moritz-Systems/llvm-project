@@ -40,14 +40,15 @@ struct MockDelegate : public GDBRemoteClientBase::ContinueDelegate {
 
 struct TestClient : public GDBRemoteClientBase {
   TestClient() : GDBRemoteClientBase("test.client") {
-    m_send_acks = false;
+    GetCommunication().DisableSendingAcks();
   }
 };
 
 class GDBRemoteClientBaseTest : public GDBRemoteTest {
 public:
   void SetUp() override {
-    ASSERT_THAT_ERROR(GDBRemoteCommunication::ConnectLocally(client, server),
+    ASSERT_THAT_ERROR(GDBRemoteCommunication::ConnectLocally(
+                          client.GetCommunication(), server),
                       llvm::Succeeded());
     ASSERT_EQ(TestClient::eBroadcastBitRunPacketSent,
               listener_sp->StartListeningForEvents(

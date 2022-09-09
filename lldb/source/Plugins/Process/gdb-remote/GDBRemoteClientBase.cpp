@@ -32,8 +32,8 @@ static const seconds kWakeupInterval(5);
 GDBRemoteClientBase::ContinueDelegate::~ContinueDelegate() = default;
 
 GDBRemoteClientBase::GDBRemoteClientBase(const char *comm_name)
-    : GDBRemoteCommunication(), Broadcaster(nullptr, comm_name),
-      m_async_count(0), m_is_running(false), m_should_stop(false) {}
+    : Broadcaster(nullptr, comm_name), m_async_count(0), m_is_running(false),
+      m_should_stop(false) {}
 
 StateType GDBRemoteClientBase::SendContinuePacketAndWaitForResponse(
     ContinueDelegate &delegate, const UnixSignals &signals,
@@ -230,7 +230,7 @@ GDBRemoteClientBase::SendPacketAndReceiveResponseWithOutputSupport(
   if (packet_result != PacketResult::Success)
     return packet_result;
 
-  return ReadPacketWithOutputSupport(response, GetPacketTimeout(), true,
+  return ReadPacketWithOutputSupport(response, m_comm.GetPacketTimeout(), true,
                                      output_callback);
 }
 
@@ -243,7 +243,7 @@ GDBRemoteClientBase::SendPacketAndWaitForResponseNoLock(
 
   const size_t max_response_retries = 3;
   for (size_t i = 0; i < max_response_retries; ++i) {
-    packet_result = ReadPacket(response, GetPacketTimeout(), true);
+    packet_result = ReadPacket(response, m_comm.GetPacketTimeout(), true);
     // Make sure we received a response
     if (packet_result != PacketResult::Success)
       return packet_result;
@@ -401,4 +401,29 @@ GDBRemoteClientBase::Lock::~Lock() {
     --m_comm.m_async_count;
   }
   m_comm.m_cv.notify_one();
+}
+
+GDBRemoteClientBase::PacketResult
+GDBRemoteClientBase::ReadPacket(StringExtractorGDBRemote &response,
+                                Timeout<std::micro> timeout,
+                                bool sync_on_timeout) {
+  return m_comm.ReadPacket(response, timeout, sync_on_timeout);
+}
+
+GDBRemoteClientBase::PacketResult
+GDBRemoteClientBase::SendPacketNoLock(llvm::StringRef payload) {
+  return m_comm.SendPacketNoLock(payload);
+}
+
+size_t GDBRemoteClientBase::SendAck() { return m_comm.SendAck(); }
+
+size_t GDBRemoteClientBase::Write(const void *src, size_t src_len,
+                                  ConnectionStatus &status, Status *error_ptr) {
+  return m_comm.Write(src, src_len, status, error_ptr);
+}
+
+bool GDBRemoteClientBase::IsConnected() const { return m_comm.IsConnected(); }
+
+ConnectionStatus GDBRemoteClientBase::Disconnect(Status *error_ptr) {
+  return m_comm.Disconnect(error_ptr);
 }

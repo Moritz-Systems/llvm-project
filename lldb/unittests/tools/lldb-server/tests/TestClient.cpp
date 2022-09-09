@@ -31,8 +31,8 @@ using namespace llgs_tests;
 #endif
 
 TestClient::TestClient(std::unique_ptr<Connection> Conn) {
-  SetConnection(std::move(Conn));
-  SetPacketTimeout(std::chrono::seconds(10));
+  GetCommunication().SetConnection(std::move(Conn));
+  GetCommunication().SetPacketTimeout(std::chrono::seconds(10));
 }
 
 TestClient::~TestClient() {
@@ -50,7 +50,7 @@ Error TestClient::initializeConnection() {
   if (Error E = SendMessage("QStartNoAckMode"))
     return E;
 
-  m_send_acks = false;
+  GetCommunication().DisableSendingAcks();
   return Error::success();
 }
 
@@ -268,7 +268,8 @@ Error TestClient::Continue(StringRef message) {
   m_stop_reply = std::move(*StopReplyOr);
   if (!isa<StopReplyStop>(m_stop_reply)) {
     StringExtractorGDBRemote R;
-    PacketResult result = ReadPacket(R, GetPacketTimeout(), false);
+    PacketResult result =
+        ReadPacket(R, GetCommunication().GetPacketTimeout(), false);
     if (result != PacketResult::ErrorDisconnected) {
       return make_error<StringError>(
           formatv("Expected connection close after sending {0}. Got {1}/{2} "

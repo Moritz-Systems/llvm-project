@@ -110,7 +110,10 @@ void DumpProcessGDBRemotePacketHistory(void *p, const char *path) {
     return;
   }
   StreamFile stream(std::move(file.get()));
-  ((ProcessGDBRemote *)p)->GetGDBRemote().DumpHistory(stream);
+  ((ProcessGDBRemote *)p)
+      ->GetGDBRemote()
+      .GetCommunication()
+      .DumpHistory(stream);
 }
 } // namespace lldb
 
@@ -282,7 +285,8 @@ ProcessGDBRemote::ProcessGDBRemote(lldb::TargetSP target_sp,
   const uint64_t timeout_seconds =
       GetGlobalPluginProperties().GetPacketTimeout();
   if (timeout_seconds > 0)
-    m_gdb_comm.SetPacketTimeout(std::chrono::seconds(timeout_seconds));
+    m_gdb_comm.GetCommunication().SetPacketTimeout(
+        std::chrono::seconds(timeout_seconds));
 
   m_use_g_packet_for_reading =
       GetGlobalPluginProperties().GetUseGPacketForReading();
@@ -797,8 +801,8 @@ Status ProcessGDBRemote::DoLaunch(lldb_private::Module *exe_module,
 
     {
       // Scope for the scoped timeout object
-      GDBRemoteCommunication::ScopedTimeout timeout(m_gdb_comm,
-                                                    std::chrono::seconds(10));
+      GDBRemoteCommunication::ScopedTimeout timeout(
+          m_gdb_comm.GetCommunication(), std::chrono::seconds(10));
 
       // Since we can't send argv0 separate from the executable path, we need to
       // make sure to use the actual executable path found in the launch_info...
@@ -863,7 +867,7 @@ Status ProcessGDBRemote::ConnectToDebugserver(llvm::StringRef connect_url) {
       uint32_t retry_count = 0;
       while (!m_gdb_comm.IsConnected()) {
         if (conn_up->Connect(connect_url, &error) == eConnectionStatusSuccess) {
-          m_gdb_comm.SetConnection(std::move(conn_up));
+          m_gdb_comm.GetCommunication().SetConnection(std::move(conn_up));
           break;
         }
 
@@ -3263,7 +3267,7 @@ Status ProcessGDBRemote::LaunchAndConnectToDebugserver(
     communication_fd = gdb_socket;
 #endif
 
-    error = m_gdb_comm.StartDebugserverProcess(
+    error = m_gdb_comm.GetCommunication().StartDebugserverProcess(
         nullptr, GetTarget().GetPlatform().get(), debugserver_launch_info,
         nullptr, nullptr, communication_fd);
 
@@ -3277,7 +3281,7 @@ Status ProcessGDBRemote::LaunchAndConnectToDebugserver(
       // Our process spawned correctly, we can now set our connection to use
       // our end of the socket pair
       cleanup_our.release();
-      m_gdb_comm.SetConnection(
+      m_gdb_comm.GetCommunication().SetConnection(
           std::make_unique<ConnectionFileDescriptor>(our_socket, true));
 #endif
       StartAsyncThread();
@@ -3811,7 +3815,7 @@ ProcessGDBRemote::GetLoadedDynamicLibrariesInfos_sender(
 
   if (m_gdb_comm.GetLoadedDynamicLibrariesInfosSupported()) {
     // Scope for the scoped timeout object
-    GDBRemoteCommunication::ScopedTimeout timeout(m_gdb_comm,
+    GDBRemoteCommunication::ScopedTimeout timeout(m_gdb_comm.GetCommunication(),
                                                   std::chrono::seconds(10));
 
     StreamString packet;
@@ -4946,7 +4950,8 @@ public:
     ProcessGDBRemote *process =
         (ProcessGDBRemote *)m_interpreter.GetExecutionContext().GetProcessPtr();
     if (process) {
-      process->GetGDBRemote().DumpHistory(result.GetOutputStream());
+      process->GetGDBRemote().GetCommunication().DumpHistory(
+          result.GetOutputStream());
       result.SetStatus(eReturnStatusSuccessFinishResult);
       return true;
     }

@@ -236,10 +236,11 @@ Status PlatformRemoteGDBServer::ConnectRemote(Args &args) {
 
   auto client_up =
       std::make_unique<process_gdb_remote::GDBRemoteCommunicationClient>();
-  client_up->SetPacketTimeout(
+  client_up->GetCommunication().SetPacketTimeout(
       process_gdb_remote::ProcessGDBRemote::GetPacketTimeout());
-  client_up->SetConnection(std::make_unique<ConnectionFileDescriptor>());
-  client_up->Connect(url, &error);
+  client_up->GetCommunication().SetConnection(
+      std::make_unique<ConnectionFileDescriptor>());
+  client_up->GetCommunication().Connect(url, &error);
 
   if (error.Fail())
     return error;
@@ -365,7 +366,7 @@ Status PlatformRemoteGDBServer::LaunchProcess(ProcessLaunchInfo &launch_info) {
   {
     // Scope for the scoped timeout object
     process_gdb_remote::GDBRemoteCommunication::ScopedTimeout timeout(
-        *m_gdb_client_up, std::chrono::seconds(5));
+        m_gdb_client_up->GetCommunication(), std::chrono::seconds(5));
     // Since we can't send argv0 separate from the executable path, we need to
     // make sure to use the actual executable path found in the launch_info...
     Args args = launch_info.GetArguments();

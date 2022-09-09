@@ -64,7 +64,7 @@ GDBRemoteCommunication::GDBRemoteCommunication()
 #else
       m_packet_timeout(1),
 #endif
-      m_echo_number(0), m_supports_qEcho(eLazyBoolCalculate), m_history(512),
+      m_echo_number(0), m_supports_qEcho(false), m_history(512),
       m_send_acks(true), m_is_platform(false),
       m_compression_type(CompressionType::None), m_listen_url() {
 }
