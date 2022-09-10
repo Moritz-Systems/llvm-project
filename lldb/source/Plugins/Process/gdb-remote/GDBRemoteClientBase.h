@@ -106,8 +106,7 @@ public:
 
   size_t SendAck();
 
-  size_t Write(const void *src, size_t src_len, lldb::ConnectionStatus &status,
-               Status *error_ptr);
+  bool SendCtrlC();
 
   bool IsConnected() const;
 

@@ -374,10 +374,7 @@ void GDBRemoteClientBase::Lock::SyncWithContinueThread() {
     if (m_comm.m_async_count == 1) {
       // The sender has sent the continue packet and we are the first async
       // packet. Let's interrupt it.
-      const char ctrl_c = '\x03';
-      ConnectionStatus status = eConnectionStatusSuccess;
-      size_t bytes_written = m_comm.Write(&ctrl_c, 1, status, nullptr);
-      if (bytes_written == 0) {
+      if (!m_comm.SendCtrlC()) {
         --m_comm.m_async_count;
         LLDB_LOGF(log, "GDBRemoteClientBase::Lock::Lock failed to send "
                        "interrupt packet");
@@ -417,9 +414,11 @@ GDBRemoteClientBase::SendPacketNoLock(llvm::StringRef payload) {
 
 size_t GDBRemoteClientBase::SendAck() { return m_comm.SendAck(); }
 
-size_t GDBRemoteClientBase::Write(const void *src, size_t src_len,
-                                  ConnectionStatus &status, Status *error_ptr) {
-  return m_comm.Write(src, src_len, status, error_ptr);
+bool GDBRemoteClientBase::SendCtrlC() {
+  const char ctrl_c = '\x03';
+  ConnectionStatus status = eConnectionStatusSuccess;
+  size_t bytes_written = m_comm.Write(&ctrl_c, 1, status, nullptr);
+  return bytes_written != 0;
 }
 
 bool GDBRemoteClientBase::IsConnected() const { return m_comm.IsConnected(); }
