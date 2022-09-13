@@ -887,6 +887,11 @@ Status ProcessGDBRemote::ConnectToDebugserver(llvm::StringRef connect_url) {
     return error;
   }
 
+  llvm::Error thread_error = m_gdb_comm.StartThread();
+  if (thread_error) {
+    m_gdb_comm.Disconnect();
+    return Status(std::move(thread_error));
+  }
   // We always seem to be able to open a connection to a local port so we need
   // to make sure we can then send data to it. If we can't then we aren't
   // actually connected to anything, so try and do the handshake with the

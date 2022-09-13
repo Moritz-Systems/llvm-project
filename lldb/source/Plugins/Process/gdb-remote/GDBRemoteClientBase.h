@@ -11,7 +11,11 @@
 
 #include "GDBRemoteCommunication.h"
 
+#include "lldb/Host/HostThread.h"
+#include "lldb/Host/MainLoop.h"
+
 #include <condition_variable>
+#include <deque>
 
 namespace lldb_private {
 namespace process_gdb_remote {
@@ -22,6 +26,9 @@ public:
 
   enum {
     eBroadcastBitRunPacketSent = (1u << 0),
+    eBroadcastBitCommDone = (1u << 1),
+    eBroadcastBitCommThreadExited = (1u << 2),
+    eBroadcastBitCommPacketRecv = (1u << 3),
   };
 
   struct ContinueDelegate {
@@ -116,8 +123,22 @@ public:
     return m_comm;
   }
 
+  llvm::Error StartThread();
+  void StopThread();
+
 protected:
   GDBRemoteCommunication m_comm;
+
+  HostThread m_comm_thread;
+  bool m_comm_thread_exited;
+  std::unique_ptr<MainLoop> m_comm_loop_up;
+  std::deque<std::string> m_comm_sync_packet_queue;
+
+  void CommThreadReadHandler(MainLoopBase &loop);
+  lldb::thread_result_t CommThread();
+
+  bool RequestComm(const MainLoop::Callback &send_callback,
+                   const MainLoop::Callback &recv_callback);
 
   PacketResult
   SendPacketAndWaitForResponseNoLock(llvm::StringRef payload,

@@ -10,7 +10,10 @@
 
 #include "llvm/ADT/StringExtras.h"
 
+#include "lldb/Host/ThreadLauncher.h"
 #include "lldb/Target/UnixSignals.h"
+#include "lldb/Utility/Connection.h"
+#include "lldb/Utility/Event.h"
 #include "lldb/Utility/LLDBAssert.h"
 
 #include "ProcessGDBRemoteLog.h"
@@ -237,29 +240,50 @@ GDBRemoteClientBase::SendPacketAndReceiveResponseWithOutputSupport(
 GDBRemoteCommunication::PacketResult
 GDBRemoteClientBase::SendPacketAndWaitForResponseNoLock(
     llvm::StringRef payload, StringExtractorGDBRemote &response) {
-  PacketResult packet_result = SendPacketNoLock(payload);
-  if (packet_result != PacketResult::Success)
-    return packet_result;
-
+  PacketResult packet_result;
   const size_t max_response_retries = 3;
-  for (size_t i = 0; i < max_response_retries; ++i) {
-    packet_result = ReadPacket(response, m_comm.GetPacketTimeout(), true);
-    // Make sure we received a response
-    if (packet_result != PacketResult::Success)
-      return packet_result;
-    // Make sure our response is valid for the payload that was sent
-    if (response.ValidateResponse())
-      return packet_result;
-    // Response says it wasn't valid
-    Log *log = GetLog(GDBRLog::Packets);
-    LLDB_LOGF(
-        log,
-        "error: packet with payload \"%.*s\" got invalid response \"%s\": %s",
-        int(payload.size()), payload.data(), response.GetStringRef().data(),
-        (i == (max_response_retries - 1))
-            ? "using invalid response and giving up"
-            : "ignoring response and waiting for another");
-  }
+  size_t response_retry = 0;
+
+  // TODO: timeout
+  if (!RequestComm(
+          [this, payload, &packet_result](MainLoopBase &) {
+            packet_result = m_comm.SendPacketNoLock(payload);
+            if (packet_result != PacketResult::Success)
+              BroadcastEvent(eBroadcastBitCommDone);
+          },
+          [this, &packet_result, &payload, &response,
+           &response_retry](MainLoopBase &) {
+            while (!m_comm_sync_packet_queue.empty()) {
+              response.Reset(m_comm_sync_packet_queue.front());
+              m_comm_sync_packet_queue.pop_front();
+
+              // Make sure our response is valid for the payload that was sent
+              if (response.ValidateResponse())
+                break;
+
+              // Response says it wasn't valid
+              Log *log = GetLog(GDBRLog::Packets);
+              LLDB_LOGF(log,
+                        "error: packet with payload \"%.*s\" got invalid "
+                        "response \"%s\": %s",
+                        int(payload.size()), payload.data(),
+                        response.GetStringRef().data(),
+                        (response_retry == (max_response_retries - 1))
+                            ? "using invalid response and giving up"
+                            : "ignoring response and waiting for another");
+
+              // If we get (max_response_retries) invalid responses,
+              // return the invalid response.
+              ++response_retry;
+              if (response_retry == max_response_retries)
+                break;
+            }
+
+            packet_result = PacketResult::Success;
+            BroadcastEvent(eBroadcastBitCommDone);
+          }))
+    return PacketResult::ErrorDisconnected; // TODO
+
   return packet_result;
 }
 
@@ -400,29 +424,194 @@ GDBRemoteClientBase::Lock::~Lock() {
   m_comm.m_cv.notify_one();
 }
 
+bool GDBRemoteClientBase::RequestComm(const MainLoop::Callback &send_callback,
+                                      const MainLoop::Callback &recv_callback) {
+  if (!m_comm_thread.IsJoinable())
+    return false;
+
+  ListenerSP listener_sp(Listener::MakeListener("gdb-remote.packet-sent"));
+  if (listener_sp->StartListeningForEvents(
+          this, eBroadcastBitCommDone | eBroadcastBitCommThreadExited |
+                    eBroadcastBitCommPacketRecv)) {
+    bool packet_read = false;
+    m_comm_loop_up->AddPendingCallback(
+        [this, &packet_read, &send_callback, &recv_callback](MainLoopBase &loop) {
+          send_callback(loop);
+          // If the server replies very fast, the client may read response as part of
+          // ack packet.  Queue a read handler run to verify that we do not have any
+          // packets in the read buffer already.
+          CommThreadReadHandler(loop);
+          if (recv_callback) {
+            if (!packet_read && !m_comm_sync_packet_queue.empty()) {
+              recv_callback(loop);
+              packet_read = true;
+            }
+          }
+        });
+
+    EventSP event_sp;
+    while (!m_comm_thread_exited &&
+           listener_sp->GetEvent(event_sp, llvm::None)) {
+      if (event_sp->GetType() & eBroadcastBitCommDone)
+        return true;
+      if (event_sp->GetType() & eBroadcastBitCommThreadExited)
+        return false;
+      if (event_sp->GetType() & eBroadcastBitCommPacketRecv) {
+        m_comm_loop_up->AddPendingCallback(
+            [this, &packet_read, &recv_callback](MainLoopBase &loop) {
+              if (!packet_read && !m_comm_sync_packet_queue.empty()) {
+                recv_callback(loop);
+                packet_read = true;
+              }
+            });
+      }
+    }
+  }
+  return false;
+}
+
 GDBRemoteClientBase::PacketResult
 GDBRemoteClientBase::ReadPacket(StringExtractorGDBRemote &response,
                                 Timeout<std::micro> timeout,
                                 bool sync_on_timeout) {
-  return m_comm.ReadPacket(response, timeout, sync_on_timeout);
+  PacketResult packet_result;
+
+  if (!RequestComm([](MainLoopBase &) {},
+                   [this, &packet_result, &response](MainLoopBase &) {
+                     assert(!m_comm_sync_packet_queue.empty());
+
+                     response.Reset(m_comm_sync_packet_queue.front());
+                     m_comm_sync_packet_queue.pop_front();
+
+                     packet_result = PacketResult::Success;
+                     BroadcastEvent(eBroadcastBitCommDone);
+                   }))
+    return PacketResult::ErrorDisconnected; // TODO
+
+  return packet_result;
 }
 
 GDBRemoteClientBase::PacketResult
 GDBRemoteClientBase::SendPacketNoLock(llvm::StringRef payload) {
-  return m_comm.SendPacketNoLock(payload);
+  PacketResult packet_result;
+
+  if (!RequestComm(
+          [this, &packet_result, payload](MainLoopBase &) {
+            packet_result = m_comm.SendPacketNoLock(payload);
+            BroadcastEvent(eBroadcastBitCommDone);
+          },
+          nullptr))
+    return PacketResult::ErrorDisconnected; // TODO
+
+  return packet_result;
 }
 
-size_t GDBRemoteClientBase::SendAck() { return m_comm.SendAck(); }
+size_t GDBRemoteClientBase::SendAck() {
+  size_t bytes_written;
+
+  if (RequestComm(
+          [this, &bytes_written](MainLoopBase &) {
+            bytes_written = m_comm.SendAck();
+            BroadcastEvent(eBroadcastBitCommDone);
+          },
+          nullptr))
+    return bytes_written;
+  return 0;
+}
 
 bool GDBRemoteClientBase::SendCtrlC() {
-  const char ctrl_c = '\x03';
   ConnectionStatus status = eConnectionStatusSuccess;
-  size_t bytes_written = m_comm.Write(&ctrl_c, 1, status, nullptr);
-  return bytes_written != 0;
+  size_t bytes_written;
+
+  if (RequestComm(
+          [this, &bytes_written, &status](MainLoopBase &) {
+            const char ctrl_c = '\x03';
+            bytes_written = m_comm.Write(&ctrl_c, 1, status, nullptr);
+            BroadcastEvent(eBroadcastBitCommDone);
+          },
+          nullptr))
+    return bytes_written != 0;
+  return false;
 }
 
 bool GDBRemoteClientBase::IsConnected() const { return m_comm.IsConnected(); }
 
 ConnectionStatus GDBRemoteClientBase::Disconnect(Status *error_ptr) {
+  StopThread();
   return m_comm.Disconnect(error_ptr);
+}
+
+llvm::Error GDBRemoteClientBase::StartThread() {
+  Log *log = GetLog(GDBRLog::Process);
+  LLDB_LOG(log, "Starting comm thread");
+  assert(!m_comm_thread.IsJoinable());
+
+  // Instantiate the loop early to avoid races.
+  m_comm_loop_up.reset(new MainLoop());
+  m_comm_thread_exited = false;
+
+  auto maybe_thread = ThreadLauncher::LaunchThread(
+      "<lldb.gdb-remote.comm>", [this] { return CommThread(); });
+  if (!maybe_thread)
+    return maybe_thread.takeError();
+
+  m_comm_thread = *maybe_thread;
+  assert(m_comm_thread.IsJoinable());
+
+  return llvm::Error::success();
+}
+
+void GDBRemoteClientBase::StopThread() {
+  Log *log = GetLog(GDBRLog::Process);
+
+  if (!m_comm_thread.IsJoinable())
+    return;
+
+  LLDB_LOG(log, "Stopping comm thread");
+  m_comm_loop_up->AddPendingCallback(
+      [](MainLoopBase &loop) { loop.RequestTermination(); });
+  if (m_comm_thread.Join(nullptr).Success())
+    m_comm_loop_up.reset(nullptr);
+  assert(m_comm_thread_exited);
+}
+
+void GDBRemoteClientBase::CommThreadReadHandler(MainLoopBase &loop) {
+  StringExtractorGDBRemote response;
+
+  while (true) {
+    // Read incoming packets until we reach timeout (i.e. all pending packets have been processed).
+    PacketResult packet_result =
+        m_comm.ReadPacket(response, std::chrono::seconds(0), false);
+
+    if (packet_result == PacketResult::ErrorReplyTimeout)
+      break;
+    if (packet_result != PacketResult::Success) {
+      loop.RequestTermination();
+      break;
+    }
+
+    m_comm_sync_packet_queue.push_back(response.GetStringRef().str());
+    BroadcastEvent(eBroadcastBitCommPacketRecv);
+  }
+}
+
+lldb::thread_result_t GDBRemoteClientBase::CommThread() {
+  Log *log = GetLog(GDBRLog::Process);
+  assert(m_comm_loop_up);
+
+  Status error;
+  auto handle = m_comm_loop_up->RegisterReadObject(
+      m_comm.GetConnection()->GetReadObject(),
+      [this](MainLoopBase &loop) { CommThreadReadHandler(loop); }, error);
+  if (error.Success())
+    error = m_comm_loop_up->Run();
+  if (!error.Success()) {
+    // TODO
+  }
+
+  LLDB_LOG(log, "Comm thread exiting");
+  m_comm_thread_exited = true;
+  BroadcastEvent(eBroadcastBitCommThreadExited);
+
+  return {};
 }
